@@ -18,184 +18,28 @@ export const DEFAULT_COLUMNS = [
   { id: 'done', title: 'Done', color: 'emerald' },
 ]
 
-export const INITIAL_BOARDS = [
-  {
-    id: 'board-general',
-    title: 'Enghøjparkens Bestyrelses Board',
-    description: 'Organisation og overblik over foreningens opgaver, initiativer og bestyrelsesarbejde.',
-    creatorId: 'admin-default',
-    creatorName: 'Jacob Admin',
-    creatorEmail: 'admin@enghoejparken.dk',
-    createdAt: new Date('2026-01-01').toISOString(),
-    columns: [
-      { id: 'todo', title: 'Kommende opgaver', color: 'indigo' },
-      { id: 'in_progress', title: 'I gangværende', color: 'amber' },
-      { id: 'done', title: 'Færdige opgaver', color: 'emerald' },
-    ],
-    members: [
-      { id: 'm-1', name: 'Jacob', email: 'jacob@enghoejparken.dk', role: 'admin' },
-      { id: 'm-2', name: 'Christian', email: 'christian@enghoejparken.dk', role: 'admin' },
-      { id: 'm-3', name: 'Morten', email: 'morten@enghoejparken.dk', role: 'member' },
-      { id: 'm-4', name: 'Pia', email: 'pia@enghoejparken.dk', role: 'member' },
-      { id: 'm-5', name: 'Rasmus', email: 'rasmus@enghoejparken.dk', role: 'member' },
-    ],
-  },
-  {
-    id: 'board-product',
-    title: 'Product & Tech Roadmap',
-    description: 'Feature development, sprint planning, and infrastructure tasks.',
-    creatorId: 'admin-default',
-    creatorName: 'Simon Admin',
-    creatorEmail: 'simon@kanban.local',
-    createdAt: new Date('2026-02-01').toISOString(),
-    columns: [
-      { id: 'backlog', title: 'Backlog', color: 'slate' },
-      { id: 'todo', title: 'Sprint Backlog', color: 'indigo' },
-      { id: 'in_progress', title: 'In Progress', color: 'amber' },
-      { id: 'review', title: 'Code Review', color: 'purple' },
-      { id: 'done', title: 'Shipped', color: 'emerald' },
-    ],
-    members: [
-      { id: 'm-10', name: 'Simon Admin', email: 'simon@kanban.local', role: 'admin' },
-      { id: 'm-11', name: 'Alex Johnson', email: 'alex@kanban.local', role: 'admin' },
-      { id: 'm-12', name: 'Sarah Connor', email: 'sarah@kanban.local', role: 'member' },
-      { id: 'm-13', name: 'Michael Chen', email: 'michael@kanban.local', role: 'member' },
-    ],
-  },
-]
-
-export const INITIAL_TASKS = [
-  {
-    id: 'task-1',
-    boardId: 'board-general',
-    title: 'Forbered regnskab og budgetforslag for generalforsamling',
-    description: 'Samle alle bilag fra året og afstemme med banken forud for revisorgodkendelse.\n- [ ] Afstemme bankkonti\n- [ ] Oprette budgetoverslag\n- [ ] Sende til revisor',
-    status: 'todo',
-    priority: 'high',
-    assignees: ['Jacob', 'Christian'],
-    dueDate: '2026-11-15',
-    subtasks: [
-      { id: 'st-1', title: 'Indsaml fakturaer for havearbejde', completed: true },
-      { id: 'st-2', title: 'Klargør revisionsrapport til print', completed: false },
-    ],
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'task-2',
-    boardId: 'board-general',
-    title: 'Indkald til årlig arbejdsdag og bestil container',
-    description: 'Sende e-mail ud til alle beboere med dato og tilmeldingslink samt bestille haveaffaldscontainer.',
-    status: 'in_progress',
-    priority: 'medium',
-    assignees: ['Pia', 'Morten'],
-    dueDate: '2026-11-05',
-    subtasks: [
-      { id: 'st-3', title: 'Kontakt renovationsselskab for container', completed: true },
-      { id: 'st-4', title: 'Køb forplejning (kaffe og kage)', completed: false },
-    ],
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'task-3',
-    boardId: 'board-general',
-    title: 'Reparation af gæsteparkeringens belysning',
-    description: 'Elektrikeren har udskiftet LED-armaturerne på mast 3 og 4.',
-    status: 'done',
-    priority: 'low',
-    assignees: ['Rasmus'],
-    dueDate: '2026-10-20',
-    subtasks: [
-      { id: 'st-5', title: 'Godkend elektrikerfaktura', completed: true },
-    ],
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'task-4',
-    boardId: 'board-product',
-    title: 'Design customizable kanban boards with role management',
-    description: 'Allow users to define workflow columns and grant admin rights to teammates.\n- [x] Board CRUD & Column settings\n- [x] Multi-admin permissions\n- [x] Firestore sync with offline fallback',
-    status: 'in_progress',
-    priority: 'high',
-    assignees: ['Simon Admin', 'Alex Johnson'],
-    dueDate: '2026-11-01',
-    subtasks: [
-      { id: 'st-6', title: 'Dynamic columns renderer', completed: true },
-      { id: 'st-7', title: 'Member invite & role toggle', completed: true },
-    ],
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'task-5',
-    boardId: 'board-product',
-    title: 'Setup automated Vitest test suite and accessibility compliance',
-    description: 'Ensure all dialogs, drag and drop targets, and form controls have accessible labels and unit tests.',
-    status: 'done',
-    priority: 'medium',
-    assignees: ['Sarah Connor'],
-    dueDate: '2026-10-28',
-    subtasks: [
-      { id: 'st-8', title: 'Write tests for BoardContext', completed: true },
-      { id: 'st-9', title: 'Write tests for TaskCard and Modals', completed: true },
-    ],
-    createdAt: new Date().toISOString(),
-  },
-]
-
 export const BoardContext = createContext(null)
 
 export function BoardProvider({ children }) {
   const { currentUser, isGuest } = useAuth()
 
-  // Boards state
-  const [boards, setBoards] = useState(() => {
-    try {
-      const saved = localStorage.getItem('kanban_boards')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_BOARDS
-  })
+  // Boards state loaded from Firestore
+  const [boards, setBoards] = useState([])
 
   // Active board ID
   const [activeBoardId, setActiveBoardId] = useState(() => {
     try {
-      const saved = localStorage.getItem('kanban_active_board_id')
-      if (saved) return saved
+      return localStorage.getItem('kanban_active_board_id') || ''
     } catch {
-      // ignore
+      return ''
     }
-    return INITIAL_BOARDS[0]?.id || ''
   })
 
-  // Tasks state
-  const [tasks, setTasks] = useState(() => {
-    try {
-      const saved = localStorage.getItem('kanban_tasks')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed)) return parsed
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_TASKS
-  })
+  // Tasks state loaded from Firestore
+  const [tasks, setTasks] = useState([])
 
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [isSyncing, setIsSyncing] = useState(false)
-
-  // Save boards to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('kanban_boards', JSON.stringify(boards))
-    } catch {
-      // ignore
-    }
-  }, [boards])
 
   // Save active board ID to localStorage
   useEffect(() => {
@@ -208,37 +52,42 @@ export function BoardProvider({ children }) {
     }
   }, [activeBoardId])
 
-  // Save tasks to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('kanban_tasks', JSON.stringify(tasks))
-    } catch {
-      // ignore
-    }
-  }, [tasks])
-
   // Realtime Firestore synchronization
   useEffect(() => {
-    if (!db) return
+    if (!db) {
+      setLoading(false)
+      return
+    }
 
+    setLoading(true)
     let unsubBoards
     let unsubTasks
+    let boardsLoaded = false
+    let tasksLoaded = false
+
+    const checkLoaded = () => {
+      if (boardsLoaded && tasksLoaded) {
+        setLoading(false)
+      }
+    }
 
     try {
       const boardsColl = collection(db, 'boards')
       unsubBoards = onSnapshot(
         boardsColl,
         (snapshot) => {
-          if (!snapshot.empty) {
-            const remoteBoards = snapshot.docs.map((docSnap) => ({
-              id: docSnap.id,
-              ...docSnap.data(),
-            }))
-            setBoards(remoteBoards)
-          }
+          const remoteBoards = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }))
+          setBoards(remoteBoards)
+          boardsLoaded = true
+          checkLoaded()
         },
         (err) => {
-          console.warn('Firestore boards onSnapshot info (offline/fallback used):', err.message)
+          console.warn('Firestore boards onSnapshot info:', err.message)
+          boardsLoaded = true
+          checkLoaded()
         }
       )
 
@@ -246,20 +95,23 @@ export function BoardProvider({ children }) {
       unsubTasks = onSnapshot(
         tasksColl,
         (snapshot) => {
-          if (!snapshot.empty) {
-            const remoteTasks = snapshot.docs.map((docSnap) => ({
-              id: docSnap.id,
-              ...docSnap.data(),
-            }))
-            setTasks(remoteTasks)
-          }
+          const remoteTasks = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }))
+          setTasks(remoteTasks)
+          tasksLoaded = true
+          checkLoaded()
         },
         (err) => {
-          console.warn('Firestore tasks onSnapshot info (offline/fallback used):', err.message)
+          console.warn('Firestore tasks onSnapshot info:', err.message)
+          tasksLoaded = true
+          checkLoaded()
         }
       )
     } catch (e) {
-      console.warn('Firestore init error, using local state:', e)
+      console.warn('Firestore init error:', e)
+      setLoading(false)
     }
 
     return () => {
