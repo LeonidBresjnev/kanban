@@ -22,8 +22,27 @@ export const AuthContext = createContext({
 })
 
 export function AuthProvider({ children }) {
-  const [currentUser, setCurrentUser] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('kanban_mock_user')
+      if (savedUser) {
+        return JSON.parse(savedUser)
+      }
+      const guestActive = localStorage.getItem('kanban_guest_mode') === 'true'
+      if (guestActive) {
+        return {
+          uid: 'guest_user_id',
+          email: 'guest@kanban.local',
+          displayName: 'Guest User',
+          isAnonymous: true,
+        }
+      }
+      return null
+    } catch {
+      return null
+    }
+  })
+  const [loading, setLoading] = useState(false)
   const [isGuest, setIsGuest] = useState(() => {
     try {
       return localStorage.getItem('kanban_guest_mode') === 'true'
@@ -57,9 +76,17 @@ export function AuthProvider({ children }) {
           // ignore
         }
       } else {
-        // If guest mode was active, preserve guest user
+        // If mock user or guest mode was active, preserve user
         const guestActive = localStorage.getItem('kanban_guest_mode') === 'true'
-        if (guestActive) {
+        const savedMockUser = localStorage.getItem('kanban_mock_user')
+        if (savedMockUser) {
+          try {
+            setCurrentUser(JSON.parse(savedMockUser))
+            setIsGuest(false)
+          } catch {
+            setCurrentUser(null)
+          }
+        } else if (guestActive) {
           setIsGuest(true)
           setCurrentUser({
             uid: 'guest_user_id',

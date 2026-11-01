@@ -11,7 +11,8 @@ import CreateBoardModal from './components/CreateBoardModal'
 import BoardSettingsModal from './components/BoardSettingsModal'
 import DeleteTaskDialog from './components/DeleteTaskDialog'
 import AuthModal from './components/AuthModal'
-import { Plus, Layout, Sparkles } from 'lucide-react'
+import InvitationBanner from './components/InvitationBanner'
+import { Plus, Layout } from 'lucide-react'
 
 function KanbanApp() {
   const { t } = useTranslation()
@@ -23,6 +24,10 @@ function KanbanApp() {
     createBoard,
     updateBoard,
     deleteBoard,
+    leaveBoard,
+    pendingInvitations,
+    acceptInvitation,
+    declineInvitation,
     isCurrentUserAdmin,
     tasks,
     createTask,
@@ -110,6 +115,13 @@ function KanbanApp() {
         onAddNewTaskClick={() => handleOpenNewTask()}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         isAdmin={isCurrentUserAdmin}
+      />
+
+      {/* Invitations Notification Banner */}
+      <InvitationBanner
+        invitations={pendingInvitations}
+        onAcceptInvitation={acceptInvitation}
+        onDeclineInvitation={declineInvitation}
       />
 
       {/* Main Board Container */}
@@ -211,6 +223,7 @@ function KanbanApp() {
         board={currentBoard}
         onUpdateBoard={updateBoard}
         onDeleteBoard={deleteBoard}
+        onLeaveBoard={leaveBoard}
         isAdmin={isCurrentUserAdmin}
         currentUser={currentUser}
       />

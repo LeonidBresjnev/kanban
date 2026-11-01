@@ -8,12 +8,11 @@ import {
   Plus,
   ArrowUp,
   ArrowDown,
-  Layout,
   AlertTriangle,
-  UserCheck,
-  ShieldCheck,
   Check,
   AlertCircle,
+  Mail,
+  LogOut,
 } from 'lucide-react'
 import { useTranslation } from '../i18n'
 
@@ -33,6 +32,7 @@ export default function BoardSettingsModal({
   board,
   onUpdateBoard,
   onDeleteBoard,
+  onLeaveBoard,
   isAdmin = false,
   currentUser = null,
 }) {
@@ -43,6 +43,7 @@ export default function BoardSettingsModal({
   const [description, setDescription] = useState('')
   const [columns, setColumns] = useState([])
   const [members, setMembers] = useState([])
+  const [invitations, setInvitations] = useState([])
 
   const [newColumnTitle, setNewColumnTitle] = useState('')
   const [newColumnColor, setNewColumnColor] = useState('indigo')
@@ -54,6 +55,7 @@ export default function BoardSettingsModal({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
 
   useEffect(() => {
     if (board) {
@@ -61,10 +63,12 @@ export default function BoardSettingsModal({
       setDescription(board.description || '')
       setColumns(Array.isArray(board.columns) ? board.columns : [])
       setMembers(Array.isArray(board.members) ? board.members : [])
+      setInvitations(Array.isArray(board.invitations) ? board.invitations : [])
     }
     setError('')
     setSuccess('')
     setShowDeleteConfirm(false)
+    setShowLeaveConfirm(false)
   }, [board, isOpen])
 
   if (!isOpen || !board) return null
@@ -124,30 +128,48 @@ export default function BoardSettingsModal({
 
     const displayName = trimmedName || trimmedEmail.split('@')[0]
 
-    const exists = members.some(
+    const existsInMembers = members.some(
       (m) =>
         (trimmedEmail && m.email && m.email.toLowerCase() === trimmedEmail.toLowerCase()) ||
         (trimmedName && m.name && m.name.toLowerCase() === trimmedName.toLowerCase())
     )
 
-    if (exists) {
+    if (existsInMembers) {
       setError('Member is already on this board.')
       return
     }
 
-    const newMember = {
-      id: 'm-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
+    const existsInInvitations = invitations.some(
+      (inv) =>
+        (trimmedEmail && inv.email && inv.email.toLowerCase() === trimmedEmail.toLowerCase()) ||
+        (trimmedName && inv.name && inv.name.toLowerCase() === trimmedName.toLowerCase())
+    )
+
+    if (existsInInvitations) {
+      setError(t('invitations.alreadyInvited'))
+      return
+    }
+
+    const newInvitation = {
+      id: 'inv-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
       name: displayName,
       email: trimmedEmail,
       role: inviteRole || 'member',
+      invitedAt: new Date().toISOString(),
+      invitedBy: currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Administrator',
     }
 
-    setMembers([...members, newMember])
+    setInvitations([...invitations, newInvitation])
     setInviteName('')
     setInviteEmail('')
     setInviteRole('member')
     setError('')
     setSuccess(t('boards.memberInvited'))
+  }
+
+  const handleCancelInvitation = (invitationId) => {
+    setInvitations(invitations.filter((inv) => inv.id !== invitationId))
+    setSuccess(t('invitations.invitationCancelled'))
   }
 
   const handleToggleMemberRole = (memberId, currentRole) => {
@@ -182,6 +204,33 @@ export default function BoardSettingsModal({
     setSuccess(t('boards.memberRemoved'))
   }
 
+  const handleLeaveBoardAction = async () => {
+    const userEmail = (currentUser?.email || '').toLowerCase()
+    const userName = (currentUser?.displayName || '').toLowerCase()
+    const userId = currentUser?.uid
+
+    const isMemberAdmin = members.some((m) => {
+      const isThisUser =
+        (userId && m.id === userId) ||
+        (userEmail && m.email && m.email.toLowerCase() === userEmail) ||
+        (userName && m.name && m.name.toLowerCase() === userName)
+      return isThisUser && m.role === 'admin'
+    })
+
+    if (isMemberAdmin) {
+      const adminCount = members.filter((m) => m.role === 'admin').length
+      if (adminCount <= 1 && members.length > 1) {
+        setError(t('invitations.cannotLeaveOnlyAdmin'))
+        return
+      }
+    }
+
+    if (onLeaveBoard) {
+      await onLeaveBoard(board.id)
+      onClose()
+    }
+  }
+
   const handleSave = async (e) => {
     e.preventDefault()
     if (!title.trim()) {
@@ -199,6 +248,7 @@ export default function BoardSettingsModal({
       description: description.trim(),
       columns,
       members,
+      invitations,
     })
 
     onClose()
@@ -463,7 +513,7 @@ export default function BoardSettingsModal({
 
           {/* Members & Roles Tab */}
           {activeTab === 'members' && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 leading-relaxed">
                 <p className="font-semibold text-slate-800 mb-0.5">
                   {t('members.title')}
@@ -513,99 +563,233 @@ export default function BoardSettingsModal({
                 </div>
               )}
 
-              {/* Members List */}
+              {/* Active Members Section */}
               <div className="space-y-2">
-                {members.map((member) => {
-                  const isCurrentAdmin = member.role === 'admin'
-                  const isCreator =
-                    board.creatorId === member.id ||
-                    (board.creatorEmail &&
-                      member.email &&
-                      board.creatorEmail.toLowerCase() === member.email.toLowerCase())
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700 uppercase tracking-wider px-1">
+                  <span>{t('invitations.activeMembers')}</span>
+                  <span className="text-slate-400 font-semibold">{members.length}</span>
+                </div>
 
-                  return (
+                {members.length === 0 ? (
+                  <p className="p-3 text-xs text-slate-400 italic text-center bg-slate-50 rounded-xl">
+                    {t('members.emptyMembers')}
+                  </p>
+                ) : (
+                  members.map((member) => {
+                    const isCurrentAdmin = member.role === 'admin'
+                    const isCreator =
+                      board.creatorId === member.id ||
+                      (board.creatorEmail &&
+                        member.email &&
+                        board.creatorEmail.toLowerCase() === member.email.toLowerCase())
+
+                    const isCurrentLoggedInUser =
+                      currentUser &&
+                      ((currentUser.uid && member.id === currentUser.uid) ||
+                        (currentUser.email &&
+                          member.email &&
+                          currentUser.email.toLowerCase() === member.email.toLowerCase()) ||
+                        (currentUser.displayName &&
+                          member.name &&
+                          currentUser.displayName.toLowerCase() === member.name.toLowerCase()))
+
+                    return (
+                      <div
+                        key={member.id}
+                        className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl shadow-2xs hover:border-slate-300 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0 pr-2">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                            {member.name ? member.name.charAt(0).toUpperCase() : 'M'}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-slate-900 truncate">
+                                {member.name}
+                              </span>
+                              {isCurrentLoggedInUser && (
+                                <span className="text-[10px] font-semibold text-sky-600 bg-sky-50 px-1.5 py-0.2 rounded border border-sky-100 shrink-0">
+                                  {t('members.you')}
+                                </span>
+                              )}
+                              {isCreator && (
+                                <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded shrink-0">
+                                  {t('boards.ownerBadge')}
+                                </span>
+                              )}
+                            </div>
+                            {member.email && (
+                              <p className="text-[11px] text-slate-500 truncate">
+                                {member.email}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* Role Badge / Toggle button for Admins */}
+                          {isAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleMemberRole(member.id, member.role)}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer border ${
+                                isCurrentAdmin
+                                  ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                              }`}
+                              title={
+                                isCurrentAdmin ? t('members.removeAdmin') : t('members.makeAdmin')
+                              }
+                            >
+                              <Shield className="w-3.5 h-3.5 text-indigo-500" />
+                              <span>
+                                {isCurrentAdmin
+                                  ? t('members.roleAdmin')
+                                  : t('members.roleMember')}
+                              </span>
+                            </button>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded border ${
+                                isCurrentAdmin
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200'
+                              }`}
+                            >
+                              {isCurrentAdmin && (
+                                <Shield className="w-3 h-3 text-indigo-500" />
+                              )}
+                              {isCurrentAdmin
+                                ? t('members.roleAdmin')
+                                : t('members.roleMember')}
+                            </span>
+                          )}
+
+                          {/* Remove Member button */}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveMember(member.id)}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer transition-colors"
+                              title={t('members.removeMember')}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+
+              {/* Pending Invitations Section */}
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700 uppercase tracking-wider px-1">
+                  <span className="flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-sky-500" />
+                    <span>{t('invitations.pendingInvitations')}</span>
+                  </span>
+                  <span className="text-sky-600 font-semibold">{invitations.length}</span>
+                </div>
+
+                {invitations.length === 0 ? (
+                  <p className="p-3 text-xs text-slate-400 italic text-center bg-slate-50/70 rounded-xl border border-slate-100">
+                    {t('invitations.noPendingInvitations')}
+                  </p>
+                ) : (
+                  invitations.map((inv) => (
                     <div
-                      key={member.id}
-                      className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl shadow-2xs hover:border-slate-300 transition-colors"
+                      key={inv.id}
+                      className="flex items-center justify-between p-3 bg-sky-50/40 border border-sky-100 rounded-xl"
                     >
                       <div className="flex items-center gap-3 min-w-0 pr-2">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                          {member.name ? member.name.charAt(0).toUpperCase() : 'M'}
+                        <div className="w-8 h-8 rounded-full bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center shrink-0">
+                          {inv.name ? inv.name.charAt(0).toUpperCase() : 'I'}
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-slate-900 truncate">
-                              {member.name}
+                            <span className="text-xs font-bold text-slate-800 truncate">
+                              {inv.name}
                             </span>
-                            {isCreator && (
-                              <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded shrink-0">
-                                {t('boards.ownerBadge')}
-                              </span>
-                            )}
+                            <span className="text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded shrink-0">
+                              {t('invitations.pendingBadge')}
+                            </span>
                           </div>
-                          {member.email && (
+                          {inv.email && (
                             <p className="text-[11px] text-slate-500 truncate">
-                              {member.email}
+                              {inv.email}
                             </p>
                           )}
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        {/* Role Badge / Toggle button for Admins */}
-                        {isAdmin ? (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleMemberRole(member.id, member.role)}
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer border ${
-                              isCurrentAdmin
-                                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
-                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                            }`}
-                            title={
-                              isCurrentAdmin ? t('members.removeAdmin') : t('members.makeAdmin')
-                            }
-                          >
-                            <Shield className="w-3.5 h-3.5 text-indigo-500" />
-                            <span>
-                              {isCurrentAdmin
-                                ? t('members.roleAdmin')
-                                : t('members.roleMember')}
-                            </span>
-                          </button>
-                        ) : (
-                          <span
-                            className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded border ${
-                              isCurrentAdmin
-                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                            }`}
-                          >
-                            {isCurrentAdmin && (
-                              <Shield className="w-3 h-3 text-indigo-500" />
-                            )}
-                            {isCurrentAdmin
-                              ? t('members.roleAdmin')
-                              : t('members.roleMember')}
-                          </span>
-                        )}
+                        <span className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded-lg">
+                          {inv.role === 'admin'
+                            ? t('members.roleAdmin')
+                            : t('members.roleMember')}
+                        </span>
 
-                        {/* Remove Member button */}
                         {isAdmin && (
                           <button
                             type="button"
-                            onClick={() => handleRemoveMember(member.id)}
+                            onClick={() => handleCancelInvitation(inv.id)}
                             className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer transition-colors"
-                            title={t('members.removeMember')}
+                            title={t('invitations.cancelInvitation')}
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         )}
                       </div>
                     </div>
-                  )
-                })}
+                  ))
+                )}
               </div>
+
+              {/* Leave Board Section (Available to members) */}
+              {onLeaveBoard && (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl pt-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800">
+                        {t('boards.leaveBoard')}
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        {t('boards.leaveBoardConfirm', { name: board.title })}
+                      </p>
+                    </div>
+
+                    {!showLeaveConfirm ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowLeaveConfirm(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 hover:text-red-800 bg-white hover:bg-red-50 border border-red-200 rounded-xl transition-colors cursor-pointer shrink-0"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>{t('boards.leaveBoard')}</span>
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleLeaveBoardAction}
+                          className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg cursor-pointer transition-colors shadow-xs"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowLeaveConfirm(false)}
+                          className="px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800"
+                        >
+                          {t('cancel')}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

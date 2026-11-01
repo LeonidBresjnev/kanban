@@ -57,6 +57,29 @@ export default {
     memberRemoved: 'Member removed from board.',
     onlyAdminCanEditSettings: 'Only board administrators can modify board settings and members.',
     defaultColumnsNote: 'You can customize your workflow columns anytime in Board Settings.',
+    leaveBoard: 'Leave board',
+    leaveBoardConfirm: 'Are you sure you want to leave the board "{name}"? You will no longer have access to this board unless re-invited.',
+    leaveBoardSuccess: 'You have left the board.',
+    cannotLeaveOnlyAdmin: 'You cannot leave the board as the only administrator. Please assign another administrator first or delete the board.',
+  },
+
+  // Invitations
+  invitations: {
+    bannerTitle: 'Board Invitations',
+    invitedToJoin: 'You have been invited to join {boardTitle} as {role}.',
+    invitedBy: 'Invited by {name}',
+    accept: 'Accept Invitation',
+    decline: 'Decline',
+    acceptedSuccess: 'You have joined {boardTitle}!',
+    declinedSuccess: 'Invitation declined.',
+    pendingInvitations: 'Pending Invitations',
+    pendingBadge: 'Pending',
+    cancelInvitation: 'Cancel invitation',
+    invitationCancelled: 'Invitation cancelled.',
+    noPendingInvitations: 'No pending invitations.',
+    invitationSent: 'Invitation sent to {name}.',
+    alreadyInvited: 'This user already has a pending invitation.',
+    activeMembers: 'Active Members',
   },
 
   // Members & Roles

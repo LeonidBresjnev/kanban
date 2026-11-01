@@ -5,7 +5,6 @@ import {
   collection,
   doc,
   setDoc,
-  addDoc,
   updateDoc,
   deleteDoc,
   onSnapshot,
@@ -17,6 +16,22 @@ export const DEFAULT_COLUMNS = [
   { id: 'in_progress', title: 'In Progress', color: 'amber' },
   { id: 'done', title: 'Done', color: 'emerald' },
 ]
+
+export const isUserMemberOfBoard = (board, user, isGuest) => {
+  if (!board) return false
+  if (!user || isGuest) return true
+
+  const userEmail = (user.email || '').toLowerCase()
+  const userName = (user.displayName || '').toLowerCase()
+  const userId = user.uid
+
+  return (board.members || []).some((m) => {
+    if (m.id && m.id === userId) return true
+    if (m.email && m.email.toLowerCase() === userEmail) return true
+    if (userName && m.name && m.name.toLowerCase() === userName) return true
+    return false
+  })
+}
 
 export const BoardContext = createContext(null)
 
@@ -120,22 +135,77 @@ export function BoardProvider({ children }) {
     }
   }, [])
 
+  // Filter boards that the current user has access to (is member or creator, or guest mode)
+  const accessibleBoards = useMemo(() => {
+    if (!currentUser || isGuest) return boards
+    return boards.filter((b) => isUserMemberOfBoard(b, currentUser, isGuest))
+  }, [boards, currentUser, isGuest])
+
   // Ensure an active board is always selected
   useEffect(() => {
-    if (boards.length > 0) {
-      const exists = boards.some((b) => b.id === activeBoardId)
+    if (accessibleBoards.length > 0) {
+      const exists = accessibleBoards.some((b) => b.id === activeBoardId)
       if (!exists) {
-        setActiveBoardId(boards[0].id)
+        setActiveBoardId(accessibleBoards[0].id)
       }
     } else {
       setActiveBoardId('')
     }
-  }, [boards, activeBoardId])
+  }, [accessibleBoards, activeBoardId])
 
   // Current active board object
   const currentBoard = useMemo(() => {
-    return boards.find((b) => b.id === activeBoardId) || boards[0] || null
-  }, [boards, activeBoardId])
+    return accessibleBoards.find((b) => b.id === activeBoardId) || accessibleBoards[0] || null
+  }, [accessibleBoards, activeBoardId])
+
+  // Invitations targeting the current logged-in user
+  const pendingInvitations = useMemo(() => {
+    if (!currentUser) return []
+    const list = []
+    const userEmail = (currentUser.email || '').toLowerCase()
+    const userName = (currentUser.displayName || '').toLowerCase()
+    const userPrefix = userEmail ? userEmail.split('@')[0] : ''
+
+    boards.forEach((board) => {
+      // Don't show invitation if user is already an accepted member or creator
+      const isMember =
+        (board.members || []).some((m) => {
+          if (m.id && m.id === currentUser.uid) return true
+          if (m.email && m.email.toLowerCase() === userEmail) return true
+          if (userName && m.name && m.name.toLowerCase() === userName) return true
+          return false
+        }) ||
+        board.creatorId === currentUser.uid ||
+        (board.creatorEmail && board.creatorEmail.toLowerCase() === userEmail)
+
+      if (isMember) return
+
+      ;(board.invitations || []).forEach((inv) => {
+        const invEmail = (inv.email || '').toLowerCase()
+        const invName = (inv.name || '').toLowerCase()
+
+        const matches =
+          (userEmail && invEmail && invEmail === userEmail) ||
+          (userName && invName && invName === userName) ||
+          (userEmail && invName && (invName === userEmail || invName === userPrefix))
+
+        if (matches) {
+          list.push({
+            boardId: board.id,
+            boardTitle: board.title,
+            boardDescription: board.description,
+            invitationId: inv.id,
+            role: inv.role || 'member',
+            invitedBy: inv.invitedBy || board.creatorName || 'Administrator',
+            invitedAt: inv.invitedAt,
+            invitation: inv,
+          })
+        }
+      })
+    })
+
+    return list
+  }, [boards, currentUser])
 
   // Determine if the current user has Administrator rights on the active board
   const isCurrentUserAdmin = useMemo(() => {
@@ -183,20 +253,25 @@ export function BoardProvider({ children }) {
         name: creatorName,
         email: creatorEmail,
         role: 'admin',
+        joinedAt: new Date().toISOString(),
       },
     ]
+
+    const invitationsList = []
 
     if (Array.isArray(initialMembers)) {
       initialMembers.forEach((im, idx) => {
         if (!im) return
         const memberName = typeof im === 'string' ? im.trim() : (im.name || '').trim()
         const memberEmail = typeof im === 'object' ? (im.email || '').trim() : ''
-        if (memberName && !membersList.some((m) => m.name.toLowerCase() === memberName.toLowerCase())) {
-          membersList.push({
-            id: 'mem-' + Date.now() + '-' + idx,
-            name: memberName,
+        if (memberName || memberEmail) {
+          invitationsList.push({
+            id: 'inv-' + Date.now() + '-' + idx,
+            name: memberName || memberEmail.split('@')[0],
             email: memberEmail,
             role: typeof im === 'object' && im.role ? im.role : 'member',
+            invitedAt: new Date().toISOString(),
+            invitedBy: creatorName,
           })
         }
       })
@@ -208,6 +283,7 @@ export function BoardProvider({ children }) {
       description: (description || '').trim(),
       columns: boardColumns,
       members: membersList,
+      invitations: invitationsList,
       creatorId,
       creatorName,
       creatorEmail,
@@ -269,7 +345,7 @@ export function BoardProvider({ children }) {
     setIsSyncing(false)
   }
 
-  // Member Management
+  // Member Management & Invitations
   const inviteMember = async (boardId, { name, email, role = 'member' }) => {
     const board = boards.find((b) => b.id === boardId)
     if (!board) return
@@ -287,16 +363,110 @@ export function BoardProvider({ children }) {
       throw new Error('Member already exists on this board')
     }
 
-    const newMember = {
-      id: 'm-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
+    const existingInv = (board.invitations || []).find(
+      (inv) =>
+        (trimmedEmail && inv.email && inv.email.toLowerCase() === trimmedEmail.toLowerCase()) ||
+        (trimmedName && inv.name && inv.name.toLowerCase() === trimmedName.toLowerCase())
+    )
+
+    if (existingInv) {
+      throw new Error('An invitation has already been sent to this user')
+    }
+
+    const inviterName =
+      currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Administrator'
+
+    const newInvitation = {
+      id: 'inv-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
       name: trimmedName,
       email: trimmedEmail,
       role: role || 'member',
+      invitedAt: new Date().toISOString(),
+      invitedBy: inviterName,
+    }
+
+    const updatedInvitations = [...(board.invitations || []), newInvitation]
+    await updateBoard(boardId, { invitations: updatedInvitations })
+    return newInvitation
+  }
+
+  const cancelInvitation = async (boardId, invitationId) => {
+    const board = boards.find((b) => b.id === boardId)
+    if (!board) return
+
+    const updatedInvitations = (board.invitations || []).filter((inv) => inv.id !== invitationId)
+    await updateBoard(boardId, { invitations: updatedInvitations })
+  }
+
+  const acceptInvitation = async (boardId, invitationId) => {
+    const board = boards.find((b) => b.id === boardId)
+    if (!board) return
+
+    const invitation =
+      (board.invitations || []).find((inv) => inv.id === invitationId) ||
+      (board.invitations || [])[0]
+    const updatedInvitations = (board.invitations || []).filter(
+      (inv) => inv.id !== (invitation ? invitation.id : invitationId)
+    )
+
+    const newMemberName =
+      currentUser?.displayName ||
+      invitation?.name ||
+      currentUser?.email?.split('@')[0] ||
+      'Member'
+    const newMemberEmail = currentUser?.email || invitation?.email || ''
+    const newMemberId = currentUser?.uid || 'mem-' + Date.now()
+    const newMemberRole = invitation?.role || 'member'
+
+    const newMember = {
+      id: newMemberId,
+      name: newMemberName,
+      email: newMemberEmail,
+      role: newMemberRole,
+      joinedAt: new Date().toISOString(),
     }
 
     const updatedMembers = [...(board.members || []), newMember]
-    await updateBoard(boardId, { members: updatedMembers })
+    await updateBoard(boardId, {
+      members: updatedMembers,
+      invitations: updatedInvitations,
+    })
+
+    setActiveBoardId(boardId)
     return newMember
+  }
+
+  const declineInvitation = async (boardId, invitationId) => {
+    const board = boards.find((b) => b.id === boardId)
+    if (!board) return
+
+    const updatedInvitations = (board.invitations || []).filter((inv) => inv.id !== invitationId)
+    await updateBoard(boardId, { invitations: updatedInvitations })
+  }
+
+  const leaveBoard = async (boardId) => {
+    const board = boards.find((b) => b.id === boardId)
+    if (!board) return
+
+    const userEmail = (currentUser?.email || '').toLowerCase()
+    const userName = (currentUser?.displayName || '').toLowerCase()
+    const userId = currentUser?.uid
+
+    const updatedMembers = (board.members || []).filter((m) => {
+      if (userId && m.id === userId) return false
+      if (userEmail && m.email && m.email.toLowerCase() === userEmail) return false
+      if (userName && m.name && m.name.toLowerCase() === userName) return false
+      return true
+    })
+
+    await updateBoard(boardId, {
+      members: updatedMembers,
+    })
+
+    if (activeBoardId === boardId) {
+      const remainingUserBoards = accessibleBoards.filter((b) => b.id !== boardId)
+      setActiveBoardId(remainingUserBoards[0]?.id || '')
+    }
   }
 
   const updateMemberRole = async (boardId, memberIdOrEmail, newRole) => {
@@ -420,7 +590,8 @@ export function BoardProvider({ children }) {
   return (
     <BoardContext.Provider
       value={{
-        boards,
+        boards: accessibleBoards,
+        allBoards: boards,
         currentBoard,
         activeBoardId,
         setActiveBoardId,
@@ -428,6 +599,11 @@ export function BoardProvider({ children }) {
         updateBoard,
         deleteBoard,
         inviteMember,
+        cancelInvitation,
+        acceptInvitation,
+        declineInvitation,
+        leaveBoard,
+        pendingInvitations,
         updateMemberRole,
         removeMember,
         isCurrentUserAdmin,

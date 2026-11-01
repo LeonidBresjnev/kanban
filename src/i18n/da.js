@@ -57,6 +57,29 @@ export default {
     memberRemoved: 'Medlem fjernet fra tavlen.',
     onlyAdminCanEditSettings: 'Kun tavleadministratorer kan redigere tavleindstillinger og medlemmer.',
     defaultColumnsNote: 'Du kan til enhver tid tilpasse dine kolonner i tavleindstillingerne.',
+    leaveBoard: 'Forlad tavle',
+    leaveBoardConfirm: 'Er du sikker på, at du vil forlade tavlen "{name}"? Du vil ikke længere have adgang til denne tavle, medmindre du geninviteres.',
+    leaveBoardSuccess: 'Du har forladt tavlen.',
+    cannotLeaveOnlyAdmin: 'Du kan ikke forlade tavlen som den eneste administrator. Tildel venligst en anden administrator først eller slet tavlen.',
+  },
+
+  // Invitations
+  invitations: {
+    bannerTitle: 'Tavleinvitationer',
+    invitedToJoin: 'Du er blevet inviteret til at deltage i {boardTitle} som {role}.',
+    invitedBy: 'Inviteret af {name}',
+    accept: 'Accepter invitation',
+    decline: 'Afvis',
+    acceptedSuccess: 'Du er nu medlem af {boardTitle}!',
+    declinedSuccess: 'Invitation afvist.',
+    pendingInvitations: 'Afventende invitationer',
+    pendingBadge: 'Afventer',
+    cancelInvitation: 'Annuller invitation',
+    invitationCancelled: 'Invitation annulleret.',
+    noPendingInvitations: 'Ingen afventende invitationer.',
+    invitationSent: 'Invitation sendt til {name}.',
+    alreadyInvited: 'Denne bruger har allerede en afventende invitation.',
+    activeMembers: 'Aktive medlemmer',
   },
 
   // Members & Roles
