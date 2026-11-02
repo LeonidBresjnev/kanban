@@ -435,6 +435,116 @@ describe('Kanban Application', () => {
     expect(await screen.findByText(/No boards found/i)).toBeInTheDocument()
   })
 
+  it('persists member list on Firestore document when creating board, accepting invitation, and leaving board', async () => {
+    const user = userEvent.setup()
+
+    // 1. Admin creates board
+    localStorage.setItem(
+      'kanban_mock_user',
+      JSON.stringify({
+        uid: 'user_admin_99',
+        email: 'founder@corp.com',
+        displayName: 'Frank Founder',
+      })
+    )
+
+    render(<App />)
+
+    const newBoardBtn = await screen.findByRole('button', { name: /Create new board/i })
+    await user.click(newBoardBtn)
+    const createDialog = await screen.findByRole('dialog')
+    const boardNameInput = within(createDialog).getByPlaceholderText(/e\.g\. Product Roadmap or Sprint Planning/i)
+    await user.type(boardNameInput, 'Enterprise Roadmap')
+    const createBtn = within(createDialog).getByRole('button', { name: /Create$/i })
+    await user.click(createBtn)
+
+    await screen.findByRole('heading', { name: 'Enterprise Roadmap' })
+
+    // Verify Firestore board document contains founder in members and memberIds
+    expect(mockFirestoreBoards.length).toBe(1)
+    const initialBoard = mockFirestoreBoards[0]
+    expect(initialBoard.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'user_admin_99',
+          name: 'Frank Founder',
+          email: 'founder@corp.com',
+          role: 'admin',
+        }),
+      ])
+    )
+    expect(initialBoard.memberIds).toContain('user_admin_99')
+
+    // Invite Grace
+    const settingsBtn = await screen.findByTitle('Board Settings')
+    await user.click(settingsBtn)
+    const settingsDialog = await screen.findByRole('dialog')
+    const membersTab = within(settingsDialog).getByRole('button', { name: /Members & Roles/i })
+    await user.click(membersTab)
+
+    const nameInput = within(settingsDialog).getByPlaceholderText('Name...')
+    const emailInput = within(settingsDialog).getByPlaceholderText('Email...')
+    await user.type(nameInput, 'Grace Engineer')
+    await user.type(emailInput, 'grace@corp.com')
+    const inviteBtn = within(settingsDialog).getByRole('button', { name: /Invite/i })
+    await user.click(inviteBtn)
+
+    const saveChangesBtn = within(settingsDialog).getByRole('button', { name: /Save changes/i })
+    await user.click(saveChangesBtn)
+
+    cleanup()
+
+    // 2. Grace logs in and accepts
+    localStorage.setItem(
+      'kanban_mock_user',
+      JSON.stringify({
+        uid: 'user_grace_42',
+        email: 'grace@corp.com',
+        displayName: 'Grace Engineer',
+      })
+    )
+
+    render(<App />)
+
+    const acceptBtn = await screen.findByRole('button', { name: /Accept Invitation/i })
+    await user.click(acceptBtn)
+
+    await screen.findByRole('heading', { name: 'Enterprise Roadmap' })
+
+    // Verify Firestore document now contains Grace in members and memberIds
+    const updatedBoard = mockFirestoreBoards[0]
+    expect(updatedBoard.members).toHaveLength(2)
+    expect(updatedBoard.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'user_grace_42',
+          email: 'grace@corp.com',
+        }),
+      ])
+    )
+    expect(updatedBoard.memberIds).toContain('user_grace_42')
+    expect(updatedBoard.memberIds).toContain('user_admin_99')
+
+    // 3. Grace leaves the board
+    const settingsBtnGrace = await screen.findByTitle('Board Settings')
+    await user.click(settingsBtnGrace)
+    const graceSettingsDialog = await screen.findByRole('dialog')
+    const graceMembersTab = within(graceSettingsDialog).getByRole('button', { name: /Members & Roles/i })
+    await user.click(graceMembersTab)
+
+    const leaveBtn = within(graceSettingsDialog).getByRole('button', { name: /Leave board/i })
+    await user.click(leaveBtn)
+    const confirmBtn = within(graceSettingsDialog).getByRole('button', { name: /Confirm/i })
+    await user.click(confirmBtn)
+
+    // Verify Firestore document now no longer has Grace in members and memberIds
+    const finalBoard = mockFirestoreBoards[0]
+    expect(finalBoard.members).toHaveLength(1)
+    expect(finalBoard.members.some((m) => m.id === 'user_grace_42')).toBe(false)
+    expect(finalBoard.memberIds.includes('user_grace_42')).toBe(false)
+    expect(finalBoard.memberIds).toContain('user_admin_99')
+  })
+
   it('switches language between English and Danish', async () => {
     const user = userEvent.setup()
     render(<App />)

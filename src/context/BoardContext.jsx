@@ -25,12 +25,25 @@ export const isUserMemberOfBoard = (board, user, isGuest) => {
   const userName = (user.displayName || '').toLowerCase()
   const userId = user.uid
 
-  return (board.members || []).some((m) => {
-    if (m.id && m.id === userId) return true
-    if (m.email && m.email.toLowerCase() === userEmail) return true
-    if (userName && m.name && m.name.toLowerCase() === userName) return true
+  if (Array.isArray(board.members)) {
+    return board.members.some((m) => {
+      if (m.id && m.id === userId) return true
+      if (m.email && m.email.toLowerCase() === userEmail) return true
+      if (userName && m.name && m.name.toLowerCase() === userName) return true
+      return false
+    })
+  }
+
+  if (Array.isArray(board.memberIds)) {
+    if (userId && board.memberIds.includes(userId)) return true
+    if (userEmail && board.memberIds.includes(userEmail)) return true
     return false
-  })
+  }
+
+  if (board.creatorId && userId && board.creatorId === userId) return true
+  if (board.creatorEmail && userEmail && board.creatorEmail.toLowerCase() === userEmail) return true
+
+  return false
 }
 
 export const BoardContext = createContext(null)
@@ -217,14 +230,6 @@ export function BoardProvider({ children }) {
     const userName = currentUser.displayName || ''
     const userId = currentUser.uid
 
-    // Check if creator
-    if (
-      currentBoard.creatorId === userId ||
-      (currentBoard.creatorEmail && currentBoard.creatorEmail.toLowerCase() === userEmail)
-    ) {
-      return true
-    }
-
     // Check members list
     const member = (currentBoard.members || []).find((m) => {
       if (m.id && m.id === userId) return true
@@ -233,7 +238,21 @@ export function BoardProvider({ children }) {
       return false
     })
 
-    return member?.role === 'admin'
+    if (member) {
+      return member.role === 'admin'
+    }
+
+    // Check if creator (legacy fallback when members array is empty or not defined)
+    if (!Array.isArray(currentBoard.members) || currentBoard.members.length === 0) {
+      if (
+        currentBoard.creatorId === userId ||
+        (currentBoard.creatorEmail && currentBoard.creatorEmail.toLowerCase() === userEmail)
+      ) {
+        return true
+      }
+    }
+
+    return false
   }, [currentBoard, currentUser, isGuest])
 
   // Board CRUD operations
@@ -256,6 +275,8 @@ export function BoardProvider({ children }) {
         joinedAt: new Date().toISOString(),
       },
     ]
+
+    const memberIds = [creatorId]
 
     const invitationsList = []
 
@@ -283,6 +304,7 @@ export function BoardProvider({ children }) {
       description: (description || '').trim(),
       columns: boardColumns,
       members: membersList,
+      memberIds: memberIds,
       invitations: invitationsList,
       creatorId,
       creatorName,
@@ -307,14 +329,19 @@ export function BoardProvider({ children }) {
 
   const updateBoard = async (boardId, updateData) => {
     setIsSyncing(true)
+    let processedUpdate = { ...updateData }
+    if (updateData.members && !updateData.memberIds) {
+      processedUpdate.memberIds = updateData.members.map((m) => m.id).filter(Boolean)
+    }
+
     setBoards((prev) =>
-      prev.map((b) => (b.id === boardId ? { ...b, ...updateData, updatedAt: new Date().toISOString() } : b))
+      prev.map((b) => (b.id === boardId ? { ...b, ...processedUpdate, updatedAt: new Date().toISOString() } : b))
     )
 
     if (db) {
       try {
         await updateDoc(doc(db, 'boards', boardId), {
-          ...updateData,
+          ...processedUpdate,
           updatedAt: new Date().toISOString(),
         })
       } catch (err) {
@@ -415,7 +442,7 @@ export function BoardProvider({ children }) {
       currentUser?.email?.split('@')[0] ||
       'Member'
     const newMemberEmail = currentUser?.email || invitation?.email || ''
-    const newMemberId = currentUser?.uid || 'mem-' + Date.now()
+    const newMemberId = currentUser?.uid || invitation?.userId || 'mem-' + Date.now()
     const newMemberRole = invitation?.role || 'member'
 
     const newMember = {
@@ -427,8 +454,18 @@ export function BoardProvider({ children }) {
     }
 
     const updatedMembers = [...(board.members || []), newMember]
+    const updatedMemberIds = Array.from(
+      new Set(
+        [
+          ...(board.memberIds || (board.members || []).map((m) => m.id)),
+          newMemberId,
+        ].filter(Boolean)
+      )
+    )
+
     await updateBoard(boardId, {
       members: updatedMembers,
+      memberIds: updatedMemberIds,
       invitations: updatedInvitations,
     })
 
@@ -459,8 +496,11 @@ export function BoardProvider({ children }) {
       return true
     })
 
+    const updatedMemberIds = updatedMembers.map((m) => m.id).filter(Boolean)
+
     await updateBoard(boardId, {
       members: updatedMembers,
+      memberIds: updatedMemberIds,
     })
 
     if (activeBoardId === boardId) {
@@ -480,7 +520,12 @@ export function BoardProvider({ children }) {
       return m
     })
 
-    await updateBoard(boardId, { members: updatedMembers })
+    const updatedMemberIds = updatedMembers.map((m) => m.id).filter(Boolean)
+
+    await updateBoard(boardId, {
+      members: updatedMembers,
+      memberIds: updatedMemberIds,
+    })
   }
 
   const removeMember = async (boardId, memberIdOrEmail) => {
@@ -491,7 +536,12 @@ export function BoardProvider({ children }) {
       (m) => m.id !== memberIdOrEmail && (!m.email || m.email.toLowerCase() !== memberIdOrEmail.toLowerCase())
     )
 
-    await updateBoard(boardId, { members: updatedMembers })
+    const updatedMemberIds = updatedMembers.map((m) => m.id).filter(Boolean)
+
+    await updateBoard(boardId, {
+      members: updatedMembers,
+      memberIds: updatedMemberIds,
+    })
   }
 
   // Task Operations
@@ -508,6 +558,7 @@ export function BoardProvider({ children }) {
     const newTask = {
       id: newTaskId,
       boardId: currentBoard.id,
+      memberIds: currentBoard.memberIds || (currentBoard.members || []).map((m) => m.id).filter(Boolean),
       title: taskData.title.trim(),
       description: taskData.description || '',
       status: taskData.status || currentBoard.columns[0]?.id || 'todo',
