@@ -25,8 +25,11 @@ function KanbanApp() {
     createBoard,
     updateBoard,
     deleteBoard,
+    inviteMember,
+    cancelInvitation,
     leaveBoard,
     pendingInvitations,
+    boardInvitations,
     acceptInvitation,
     declineInvitation,
     isCurrentUserAdmin,
@@ -224,6 +227,9 @@ function KanbanApp() {
         board={currentBoard}
         onUpdateBoard={updateBoard}
         onDeleteBoard={deleteBoard}
+        invitations={boardInvitations}
+        onInviteMember={inviteMember}
+        onCancelInvitation={cancelInvitation}
         onLeaveBoard={leaveBoard}
         isAdmin={isCurrentUserAdmin}
         currentUser={currentUser}

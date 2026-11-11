@@ -250,15 +250,16 @@ export function BoardProvider({ children }: BoardProviderProps) {
   }, [currentUser?.email, isGuest])
 
   // Board members can query invitations for the currently selected board.
+  const activeBoardIdForInvitations = currentBoard?.id
   useEffect(() => {
-    if (!db || !currentBoard || isGuest || !currentUser?.uid) {
+    if (!db || !activeBoardIdForInvitations || isGuest || !currentUser?.uid) {
       setBoardInvitations([])
       return
     }
 
     const invitationsQuery = query(
       collectionGroup(db, 'boards') as Query<BoardInvitation>,
-      where('boardId', '==', currentBoard.id),
+      where('boardId', '==', activeBoardIdForInvitations),
     )
 
     return onSnapshot(
@@ -271,7 +272,7 @@ export function BoardProvider({ children }: BoardProviderProps) {
         setBoardInvitations([])
       },
     )
-  }, [currentBoard?.id, currentUser?.uid, isGuest])
+  }, [activeBoardIdForInvitations, currentUser?.uid, isGuest])
 
   // Invitations targeting the current logged-in user
   const pendingInvitations = useMemo<PendingInvitation[]>(() => {
@@ -350,21 +351,22 @@ export function BoardProvider({ children }: BoardProviderProps) {
 
       const memberIds = [creatorId]
 
-      const invitationsList: BoardInvitation[] = []
-
-      initialMembers.forEach((im: InitialBoardMember, idx) => {
-        const memberName = (im.name || '').trim()
-        const memberEmail = (im.email || '').trim()
-        if (memberName || memberEmail) {
-          invitationsList.push({
-            id: 'inv-' + Date.now() + '-' + idx,
-            name: memberName || memberEmail.split('@')[0],
-            email: memberEmail,
-            role: im.role || 'member',
-            invitedAt: new Date().toISOString(),
-            invitedBy: creatorName,
-          })
-        }
+      const initialInvitations = initialMembers.flatMap((member: InitialBoardMember) => {
+        const email = (member.email || '').trim()
+        const recipientEmail = email.toLowerCase()
+        if (!recipientEmail) return []
+        return [{
+          id: newBoardId,
+          boardId: newBoardId,
+          boardTitle: title.trim(),
+          boardDescription: (description || '').trim(),
+          name: (member.name || '').trim() || email.split('@')[0],
+          email,
+          recipientEmail,
+          role: member.role || 'member',
+          invitedAt: new Date().toISOString(),
+          invitedBy: creatorName,
+        } satisfies BoardInvitation]
       })
 
       const newBoard: Board = {
@@ -374,7 +376,6 @@ export function BoardProvider({ children }: BoardProviderProps) {
         columns: boardColumns,
         members: membersList,
         memberIds,
-        invitations: invitationsList,
         creatorId,
         creatorName,
         creatorEmail,
@@ -383,7 +384,13 @@ export function BoardProvider({ children }: BoardProviderProps) {
 
       if (db && firebaseUser) {
         try {
-          await setDoc(doc(db, 'boards', newBoardId), newBoard)
+          const firestore = db
+          await setDoc(doc(firestore, 'boards', newBoardId), newBoard)
+          await Promise.all(
+            initialInvitations.map((invitation) =>
+              setDoc(doc(firestore, 'invitations', invitation.recipientEmail, 'boards', newBoardId), invitation),
+            ),
+          )
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : 'Unknown Firestore error'
           throw new Error(`Firestore rejected board creation: ${message}`, { cause: err })
@@ -450,13 +457,14 @@ export function BoardProvider({ children }: BoardProviderProps) {
     const board = boards.find((b) => b.id === boardId)
     if (!board) return
 
-    const trimmedName = name ? name.trim() : email.split('@')[0]
-    const trimmedEmail = email ? email.trim() : ''
+    const trimmedEmail = email.trim()
+    const recipientEmail = trimmedEmail.toLowerCase()
+    const trimmedName = name?.trim() || trimmedEmail.split('@')[0]
 
     const existingMember = (board.members || []).find(
       (m) => {
         return (
-          (trimmedEmail && m.email && m.email.toLowerCase() === trimmedEmail.toLowerCase()) ||
+          (recipientEmail && m.email && m.email.toLowerCase() === recipientEmail) ||
           (trimmedName && m.name && m.name.toLowerCase() === trimmedName.toLowerCase())
         )
       }
@@ -466,9 +474,9 @@ export function BoardProvider({ children }: BoardProviderProps) {
       throw new Error('Member already exists on this board')
     }
 
-    const existingInv = (board.invitations || []).find(
+    const existingInv = boardInvitations.find(
       (inv) =>
-        (trimmedEmail && inv.email && inv.email.toLowerCase() === trimmedEmail.toLowerCase()) ||
+        (recipientEmail && inv.recipientEmail === recipientEmail) ||
         (trimmedName && inv.name && inv.name.toLowerCase() === trimmedName.toLowerCase())
     )
 
@@ -476,85 +484,107 @@ export function BoardProvider({ children }: BoardProviderProps) {
       throw new Error('An invitation has already been sent to this user')
     }
 
+    const firebaseUser = !isGuest ? auth?.currentUser : null
+    if (db && !firebaseUser) {
+      throw new Error('Sign in before inviting board members.')
+    }
+
     const inviterName =
-      currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Administrator'
+      firebaseUser?.displayName || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Administrator'
 
     const newInvitation: BoardInvitation = {
-      id: 'inv-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
+      id: boardId,
+      boardId,
+      boardTitle: board.title,
+      boardDescription: board.description,
       name: trimmedName,
       email: trimmedEmail,
+      recipientEmail,
       role: role || 'member',
       invitedAt: new Date().toISOString(),
       invitedBy: inviterName,
     }
 
-    const updatedInvitations = [...(board.invitations || []), newInvitation]
-    await updateBoard(boardId, { invitations: updatedInvitations })
+    setIsSyncing(true)
+    try {
+      if (db && firebaseUser) {
+        await setDoc(
+          doc(db, 'invitations', recipientEmail, 'boards', boardId),
+          newInvitation,
+        )
+      }
+      setBoardInvitations((previous) => [...previous.filter((invitation) => invitation.id !== boardId), newInvitation])
+    } finally {
+      setIsSyncing(false)
+    }
     return newInvitation
   }
 
   const cancelInvitation = async (boardId: string, invitationId: string): Promise<void> => {
-    const board = boards.find((b) => b.id === boardId)
-    if (!board) return
-
-    const updatedInvitations = (board.invitations || []).filter((inv) => inv.id !== invitationId)
-    await updateBoard(boardId, { invitations: updatedInvitations })
+    const invitation = boardInvitations.find((entry) => entry.boardId === boardId && entry.id === invitationId)
+    if (!invitation) return
+    if (db) {
+      await deleteDoc(doc(db, 'invitations', invitation.recipientEmail, 'boards', invitation.id))
+    }
+    setBoardInvitations((previous) => previous.filter((entry) => entry.id !== invitationId))
   }
 
   const acceptInvitation = async (boardId: string, invitationId: string): Promise<BoardMember | undefined> => {
-    const board = boards.find((b) => b.id === boardId)
-    if (!board) return
-
-    const invitation =
-      (board.invitations || []).find((inv) => inv.id === invitationId) ||
-      (board.invitations || [])[0]
-    const updatedInvitations = (board.invitations || []).filter(
-      (inv) => inv.id !== (invitation ? invitation.id : invitationId)
+    const invitation = recipientInvitations.find(
+      (entry) => entry.boardId === boardId && entry.id === invitationId,
     )
+    if (!invitation) return
 
-    const newMemberName =
-      currentUser?.displayName ||
-      invitation?.name ||
-      currentUser?.email?.split('@')[0] ||
-      'Member'
-    const newMemberEmail = currentUser?.email || invitation?.email || ''
-    const newMemberId = currentUser?.uid || invitation?.userId || 'mem-' + Date.now()
-    const newMemberRole = invitation?.role || 'member'
-
-    const newMember: BoardMember = {
-      id: newMemberId,
-      name: newMemberName,
-      email: newMemberEmail,
-      role: newMemberRole,
-      joinedAt: new Date().toISOString(),
+    const firebaseUser = !isGuest ? auth?.currentUser : null
+    const memberId = firebaseUser?.uid || currentUser?.uid
+    const memberEmail = firebaseUser?.email || currentUser?.email || ''
+    if (!memberId || !memberEmail) {
+      throw new Error('Sign in with the invited email address to accept this invitation.')
     }
 
-    const updatedMembers = [...(board.members || []), newMember]
-    const updatedMemberIds = Array.from(
-      new Set(
-        [
-          ...(board.memberIds || (board.members || []).map((member) => member.id)),
-          newMemberId,
-        ].filter((memberId): memberId is string => Boolean(memberId))
-      )
-    )
+    const newMember: BoardMember = {
+      id: memberId,
+      name: invitation.name,
+      email: memberEmail,
+      role: invitation.role,
+    }
 
-    await updateBoard(boardId, {
-      members: updatedMembers,
-      memberIds: updatedMemberIds,
-      invitations: updatedInvitations,
-    })
+    if (db) {
+      if (!firebaseUser || firebaseUser.email?.toLowerCase() !== invitation.recipientEmail) {
+        throw new Error('Sign in with the invited email address to accept this invitation.')
+      }
+      const batch = writeBatch(db)
+      batch.update(doc(db, 'boards', boardId), {
+        members: arrayUnion(newMember),
+        memberIds: arrayUnion(memberId),
+        updatedAt: new Date().toISOString(),
+      })
+      batch.delete(doc(db, 'invitations', invitation.recipientEmail, 'boards', invitation.id))
+      await batch.commit()
+    } else {
+      setBoards((previous) => previous.map((board) => board.id === boardId
+        ? {
+            ...board,
+            members: [...(board.members || []), newMember],
+            memberIds: [...new Set([...(board.memberIds || []), memberId])],
+          }
+        : board))
+    }
 
+    setRecipientInvitations((previous) => previous.filter((entry) => entry.id !== invitation.id))
     setActiveBoardId(boardId)
     return newMember
   }
 
   const declineInvitation = async (boardId: string, invitationId: string): Promise<void> => {
-    const board = boards.find((b) => b.id === boardId)
-    if (!board) return
-
-    const updatedInvitations = (board.invitations || []).filter((inv) => inv.id !== invitationId)
-    await updateBoard(boardId, { invitations: updatedInvitations })
+    const invitation = recipientInvitations.find(
+      (entry) => entry.boardId === boardId && entry.id === invitationId,
+    )
+    if (!invitation) return
+    if (db) {
+      await deleteDoc(doc(db, 'invitations', invitation.recipientEmail, 'boards', invitation.id))
+    }
+    setRecipientInvitations((previous) => previous.filter((entry) => entry.id !== invitationId))
   }
 
   const leaveBoard = async (boardId: string): Promise<void> => {
@@ -739,6 +769,7 @@ export function BoardProvider({ children }: BoardProviderProps) {
         declineInvitation,
         leaveBoard,
         pendingInvitations,
+        boardInvitations,
         updateMemberRole,
         removeMember,
         isCurrentUserAdmin,

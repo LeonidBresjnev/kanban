@@ -9,29 +9,93 @@ type MockDocument = Board | BoardInvitation | Task
 type MockDocumentReference = { collName: string; id: string; path: string }
 type MockSnapshot = { empty: boolean; docs: Array<{ id: string; data: () => MockDocument }> }
 type SnapshotListener = (snapshot: MockSnapshot) => void
+type MockFilter = { field: string; operator: string; value: string }
+type MockQuery = { path: string; filters: MockFilter[] }
+type MockSubscription = { query: MockQuery; listener: SnapshotListener }
+type MockArrayUnion = { __arrayUnion: unknown[] }
 type MockAuthUser = { uid: string; email: string | null; displayName: string | null }
 
 let mockFirestoreBoards: Board[] = []
-let boardListeners: SnapshotListener[] = []
+let boardListeners: MockSubscription[] = []
 let mockFirestoreInvitations: BoardInvitation[] = []
-let invitationListeners: SnapshotListener[] = []
+let invitationListeners: MockSubscription[] = []
 let mockFirestoreTasks: Task[] = []
-let taskListeners: SnapshotListener[] = []
+let taskListeners: MockSubscription[] = []
 let mockFirebaseAuthUser: MockAuthUser | null = null
 let mockBoardWriteError: Error | null = null
 
-function boardSnapshot(): MockSnapshot {
-  return {
-    empty: mockFirestoreBoards.length === 0,
-    docs: mockFirestoreBoards.map((board) => ({ id: board.id, data: () => board })),
+function snapshotFor(query: MockQuery): MockSnapshot {
+  const filters = query.filters
+  if (query.path === 'boards') {
+    const memberFilter = filters.find((filter) => filter.field === 'memberIds' && filter.operator === 'array-contains')
+    const boards = memberFilter
+      ? mockFirestoreBoards.filter((board) => board.memberIds?.includes(memberFilter.value))
+      : mockFirestoreBoards
+    return {
+      empty: boards.length === 0,
+      docs: boards.map((board) => ({ id: board.id, data: () => board })),
+    }
   }
+
+  if (query.path === 'tasks') {
+    const memberFilter = filters.find((filter) => filter.field === 'memberIds' && filter.operator === 'array-contains')
+    const tasks = memberFilter
+      ? mockFirestoreTasks.filter((task) => task.memberIds.includes(memberFilter.value))
+      : mockFirestoreTasks
+    return {
+      empty: tasks.length === 0,
+      docs: tasks.map((task) => ({ id: task.id, data: () => task })),
+    }
+  }
+
+  if (query.path.startsWith('invitations/')) {
+    const recipientEmail = query.path.split('/')[1]
+    const invitations = mockFirestoreInvitations.filter((invitation) => invitation.recipientEmail === recipientEmail)
+    return {
+      empty: invitations.length === 0,
+      docs: invitations.map((invitation) => ({ id: invitation.id, data: () => invitation })),
+    }
+  }
+
+  if (query.path === 'group:boards') {
+    const boardFilter = filters.find((filter) => filter.field === 'boardId' && filter.operator === '==')
+    const invitations = boardFilter
+      ? mockFirestoreInvitations.filter((invitation) => invitation.boardId === boardFilter.value)
+      : mockFirestoreInvitations
+    return {
+      empty: invitations.length === 0,
+      docs: invitations.map((invitation) => ({ id: invitation.id, data: () => invitation })),
+    }
+  }
+
+  return { empty: true, docs: [] }
 }
 
-function taskSnapshot(): MockSnapshot {
-  return {
-    empty: mockFirestoreTasks.length === 0,
-    docs: mockFirestoreTasks.map((task) => ({ id: task.id, data: () => task })),
-  }
+function notifyListeners(listeners: MockSubscription[]): void {
+  listeners.forEach(({ query, listener }) => listener(snapshotFor(query)))
+}
+
+function applyBoardUpdate(boardId: string, updates: Record<string, unknown>): void {
+  mockFirestoreBoards = mockFirestoreBoards.map((board) => {
+    if (board.id !== boardId) return board
+    const resolved = Object.fromEntries(
+      Object.entries(updates).map(([key, value]) => {
+        if (typeof value === 'object' && value !== null && '__arrayUnion' in value) {
+          const current = (board as unknown as Record<string, unknown>)[key]
+          const items = (value as MockArrayUnion).__arrayUnion
+          return [key, [...(Array.isArray(current) ? current : []), ...items.filter((item) => !(Array.isArray(current) && current.some((existing) => JSON.stringify(existing) === JSON.stringify(item))))]]
+        }
+        return [key, value]
+      }),
+    )
+    return { ...board, ...resolved }
+  })
+  notifyListeners(boardListeners)
+}
+
+function applyInvitationDelete(invitationId: string): void {
+  mockFirestoreInvitations = mockFirestoreInvitations.filter((invitation) => invitation.id !== invitationId)
+  notifyListeners(invitationListeners)
 }
 
 // Mock Firebase calls so unit tests don't fail due to lack of network/auth credentials
@@ -76,25 +140,32 @@ vi.mock('../firebase', async (importOriginal) => {
       }),
     },
     collection: vi.fn((_db: unknown, ...segments: string[]) => segments.join('/')),
+    collectionGroup: vi.fn((_db: unknown, name: string) => `group:${name}`),
     doc: vi.fn((_db: unknown, ...segments: string[]): MockDocumentReference => ({
       collName: segments[0],
       id: segments[segments.length - 1],
       path: segments.join('/'),
     })),
-    query: vi.fn((collectionReference: string) => collectionReference),
-    where: vi.fn((field: string, operator: string, value: string) => ({ field, operator, value })),
-    onSnapshot: vi.fn((coll: string | { path?: string }, onNext: SnapshotListener) => {
-      const collName = typeof coll === 'string' ? coll : coll?.path || 'boards'
-      if (collName === 'boards') {
-        boardListeners.push(onNext)
-        onNext(boardSnapshot())
+    query: vi.fn((collectionReference: string | MockQuery, ...filters: MockFilter[]): MockQuery => ({
+      path: typeof collectionReference === 'string' ? collectionReference : collectionReference.path,
+      filters: typeof collectionReference === 'string' ? filters : [...collectionReference.filters, ...filters],
+    })),
+    where: vi.fn((field: string, operator: string, value: string): MockFilter => ({ field, operator, value })),
+    onSnapshot: vi.fn((coll: string | MockQuery, onNext: SnapshotListener) => {
+      const target = typeof coll === 'string' ? { path: coll, filters: [] } : coll
+      const subscription = { query: target, listener: onNext }
+      if (target.path === 'boards') {
+        boardListeners.push(subscription)
+      } else if (target.path === 'tasks') {
+        taskListeners.push(subscription)
       } else {
-        taskListeners.push(onNext)
-        onNext(taskSnapshot())
+        invitationListeners.push(subscription)
       }
+      onNext(snapshotFor(target))
       return () => {
-        boardListeners = boardListeners.filter((l) => l !== onNext)
-        taskListeners = taskListeners.filter((l) => l !== onNext)
+        boardListeners = boardListeners.filter((entry) => entry.listener !== onNext)
+        taskListeners = taskListeners.filter((entry) => entry.listener !== onNext)
+        invitationListeners = invitationListeners.filter((entry) => entry.listener !== onNext)
       }
     }),
     setDoc: vi.fn((docRef: MockDocumentReference, data: MockDocument) => {
@@ -109,40 +180,36 @@ vi.mock('../firebase', async (importOriginal) => {
           ...mockFirestoreBoards.filter((b) => b.id !== docId),
           { ...board, id: docId },
         ]
-        boardListeners.forEach((listener) => listener(boardSnapshot()))
+        notifyListeners(boardListeners)
       } else if (collName === 'invitations') {
         const invitation = data as BoardInvitation
         mockFirestoreInvitations = [
           ...mockFirestoreInvitations.filter((existing) => existing.id !== docId),
           { ...invitation, id: docId },
         ]
-        invitationListeners.forEach((listener) => listener({ empty: false, docs: [] }))
+        notifyListeners(invitationListeners)
       } else {
         const task = data as Task
         mockFirestoreTasks = [
           ...mockFirestoreTasks.filter((t) => t.id !== docId),
           { ...task, id: docId },
         ]
-        taskListeners.forEach((listener) => listener(taskSnapshot()))
+        notifyListeners(taskListeners)
       }
       return Promise.resolve(true)
     }),
     addDoc: vi.fn().mockResolvedValue({ id: 'mock-doc-id' }),
-    updateDoc: vi.fn((docRef: MockDocumentReference, updates: Partial<Board> | Partial<Task>) => {
+    updateDoc: vi.fn((docRef: MockDocumentReference, updates: Record<string, unknown>) => {
       const collName = docRef.collName || 'boards'
       const docId = docRef.id || 'mock-id'
       if (collName === 'boards') {
-        const boardUpdates = updates as Partial<Board>
-        mockFirestoreBoards = mockFirestoreBoards.map((b) =>
-          b.id === docId ? { ...b, ...boardUpdates } : b
-        )
-        boardListeners.forEach((listener) => listener(boardSnapshot()))
+        applyBoardUpdate(docId, updates)
       } else {
         const taskUpdates = updates as Partial<Task>
         mockFirestoreTasks = mockFirestoreTasks.map((t) =>
           t.id === docId ? { ...t, ...taskUpdates } : t
         )
-        taskListeners.forEach((listener) => listener(taskSnapshot()))
+        notifyListeners(taskListeners)
       }
       return Promise.resolve(true)
     }),
@@ -151,15 +218,39 @@ vi.mock('../firebase', async (importOriginal) => {
       const docId = docRef.id || 'mock-id'
       if (collName === 'boards') {
         mockFirestoreBoards = mockFirestoreBoards.filter((b) => b.id !== docId)
-        boardListeners.forEach((listener) => listener(boardSnapshot()))
+        notifyListeners(boardListeners)
       } else if (collName === 'invitations') {
-        mockFirestoreInvitations = mockFirestoreInvitations.filter((invitation) => invitation.id !== docId)
-        invitationListeners.forEach((listener) => listener({ empty: mockFirestoreInvitations.length === 0, docs: [] }))
+        applyInvitationDelete(docId)
       } else {
         mockFirestoreTasks = mockFirestoreTasks.filter((t) => t.id !== docId)
-        taskListeners.forEach((listener) => listener(taskSnapshot()))
+        notifyListeners(taskListeners)
       }
       return Promise.resolve(true)
+    }),
+    arrayUnion: vi.fn((...items: unknown[]): MockArrayUnion => ({ __arrayUnion: items })),
+    writeBatch: vi.fn(() => {
+      const writes: Array<
+        | { action: 'update'; ref: MockDocumentReference; value: Record<string, unknown> }
+        | { action: 'delete'; ref: MockDocumentReference }
+      > = []
+      return {
+        update: (ref: MockDocumentReference, value: Record<string, unknown>) => {
+          writes.push({ action: 'update', ref, value })
+        },
+        delete: (ref: MockDocumentReference) => {
+          writes.push({ action: 'delete', ref })
+        },
+        commit: async () => {
+          writes.forEach((write) => {
+            if (write.action === 'update' && write.ref.collName === 'boards') {
+              applyBoardUpdate(write.ref.id, write.value)
+            }
+            if (write.action === 'delete' && write.ref.collName === 'invitations') {
+              applyInvitationDelete(write.ref.id)
+            }
+          })
+        },
+      }
     }),
   }
 })
@@ -216,6 +307,8 @@ describe('Kanban Application', () => {
     // Add initial member
     const memberNameInput = within(dialog).getByPlaceholderText(/Name\.\.\./i)
     await user.type(memberNameInput, 'Elena Marketer')
+    const memberEmailInput = within(dialog).getByPlaceholderText(/Email \(optional\)\.\.\./i)
+    await user.type(memberEmailInput, 'elena@example.com')
     const addMemberBtn = within(dialog).getByRole('button', { name: /^Add$/i })
     await user.click(addMemberBtn)
 
@@ -225,6 +318,12 @@ describe('Kanban Application', () => {
 
     // Verify active board heading is now "Marketing Campaign 2026"
     expect(await screen.findByRole('heading', { name: 'Marketing Campaign 2026' })).toBeInTheDocument()
+    expect(mockFirestoreInvitations).toHaveLength(1)
+    expect(mockFirestoreInvitations[0]).toMatchObject({
+      boardId: mockFirestoreBoards[0].id,
+      recipientEmail: 'elena@example.com',
+    })
+    expect('invitations' in mockFirestoreBoards[0]).toBe(false)
     // Verify custom column exists
     expect(screen.getByRole('heading', { name: /Review Stage/i })).toBeInTheDocument()
   })
@@ -399,7 +498,7 @@ describe('Kanban Application', () => {
       recipientEmail: 'bob@company.com',
       email: 'bob@company.com',
     })
-    expect(mockFirestoreBoards[0].invitations).toBeUndefined()
+    expect('invitations' in mockFirestoreBoards[0]).toBe(false)
 
     // Verify Bob appears under Pending Invitations, not under Active Members
     expect(within(settingsDialog).getByText('Pending Invitations')).toBeInTheDocument()
@@ -427,6 +526,7 @@ describe('Kanban Application', () => {
     // Bob sees the invitation banner for Secret Project
     expect(await screen.findByText(/Board Invitations/i)).toBeInTheDocument()
     expect(screen.getByText(/You have been invited to join Secret Project/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Secret Project' })).not.toBeInTheDocument()
 
     // Bob accepts the invitation
     const acceptBtn = screen.getByRole('button', { name: /Accept Invitation/i })
@@ -435,6 +535,8 @@ describe('Kanban Application', () => {
     // Invitation banner disappears and Bob is now on Secret Project board
     expect(await screen.findByRole('heading', { name: 'Secret Project' })).toBeInTheDocument()
     expect(screen.queryByText(/Board Invitations \(1\)/i)).not.toBeInTheDocument()
+    expect(mockFirestoreInvitations).toHaveLength(0)
+    expect(mockFirestoreBoards[0].memberIds).toContain('bob_uid_2')
   })
 
   it('allows declining an invitation without becoming a member', async () => {

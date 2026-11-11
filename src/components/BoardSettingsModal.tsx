@@ -15,7 +15,16 @@ import {
   LogOut,
 } from 'lucide-react'
 import { useTranslation } from '../i18n'
-import type { AuthUser, Board, BoardColumn, BoardInvitation, BoardMember, BoardRole, UpdateBoardInput } from '../types'
+import type {
+  AuthUser,
+  Board,
+  BoardColumn,
+  BoardInvitation,
+  BoardMember,
+  BoardRole,
+  InviteMemberInput,
+  UpdateBoardInput,
+} from '../types'
 
 const COLOR_OPTIONS = [
   { id: 'indigo', label: 'Indigo', bg: 'bg-indigo-500' },
@@ -33,6 +42,9 @@ interface BoardSettingsModalProps {
   board: Board | null
   onUpdateBoard: (boardId: string, updates: UpdateBoardInput) => Promise<void>
   onDeleteBoard: (boardId: string) => Promise<void>
+  invitations: BoardInvitation[]
+  onInviteMember: (boardId: string, input: InviteMemberInput) => Promise<BoardInvitation | undefined>
+  onCancelInvitation: (boardId: string, invitationId: string) => Promise<void>
   onLeaveBoard?: (boardId: string) => Promise<void>
   isAdmin?: boolean
   currentUser?: AuthUser | null
@@ -44,6 +56,9 @@ export default function BoardSettingsModal({
   board,
   onUpdateBoard,
   onDeleteBoard,
+  invitations,
+  onInviteMember,
+  onCancelInvitation,
   onLeaveBoard,
   isAdmin = false,
   currentUser = null,
@@ -55,7 +70,6 @@ export default function BoardSettingsModal({
   const [description, setDescription] = useState('')
   const [columns, setColumns] = useState<BoardColumn[]>([])
   const [members, setMembers] = useState<BoardMember[]>([])
-  const [invitations, setInvitations] = useState<BoardInvitation[]>([])
 
   const [newColumnTitle, setNewColumnTitle] = useState('')
   const [newColumnColor, setNewColumnColor] = useState<BoardColumn['color']>('indigo')
@@ -75,7 +89,6 @@ export default function BoardSettingsModal({
       setDescription(board.description || '')
       setColumns(Array.isArray(board.columns) ? board.columns : [])
       setMembers(Array.isArray(board.members) ? board.members : [])
-      setInvitations(Array.isArray(board.invitations) ? board.invitations : [])
     }
     setError('')
     setSuccess('')
@@ -132,7 +145,7 @@ export default function BoardSettingsModal({
   }
 
   // Members actions
-  const handleInviteMember = (e?: React.FormEvent): void => {
+  const handleInviteMember = async (e?: React.FormEvent): Promise<void> => {
     if (e) e.preventDefault()
     const trimmedName = inviteName.trim()
     const trimmedEmail = inviteEmail.trim()
@@ -153,7 +166,7 @@ export default function BoardSettingsModal({
 
     const existsInInvitations = invitations.some(
       (inv) =>
-        (trimmedEmail && inv.email && inv.email.toLowerCase() === trimmedEmail.toLowerCase()) ||
+        (trimmedEmail && inv.recipientEmail === trimmedEmail.toLowerCase()) ||
         (trimmedName && inv.name && inv.name.toLowerCase() === trimmedName.toLowerCase())
     )
 
@@ -162,26 +175,29 @@ export default function BoardSettingsModal({
       return
     }
 
-    const newInvitation: BoardInvitation = {
-      id: 'inv-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
-      name: displayName,
-      email: trimmedEmail,
-      role: inviteRole || 'member',
-      invitedAt: new Date().toISOString(),
-      invitedBy: currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Administrator',
+    try {
+      await onInviteMember(board.id, {
+        name: displayName,
+        email: trimmedEmail,
+        role: inviteRole || 'member',
+      })
+      setInviteName('')
+      setInviteEmail('')
+      setInviteRole('member')
+      setError('')
+      setSuccess(t('boards.memberInvited'))
+    } catch (inviteError: unknown) {
+      setError(inviteError instanceof Error ? inviteError.message : 'Unable to send the invitation.')
     }
-
-    setInvitations([...invitations, newInvitation])
-    setInviteName('')
-    setInviteEmail('')
-    setInviteRole('member')
-    setError('')
-    setSuccess(t('boards.memberInvited'))
   }
 
-  const handleCancelInvitation = (invitationId: string): void => {
-    setInvitations(invitations.filter((inv) => inv.id !== invitationId))
-    setSuccess(t('invitations.invitationCancelled'))
+  const handleCancelInvitation = async (invitationId: string): Promise<void> => {
+    try {
+      await onCancelInvitation(board.id, invitationId)
+      setSuccess(t('invitations.invitationCancelled'))
+    } catch (cancelError: unknown) {
+      setError(cancelError instanceof Error ? cancelError.message : 'Unable to cancel the invitation.')
+    }
   }
 
   const handleToggleMemberRole = (memberId: string | undefined, currentRole: BoardRole | undefined): void => {
@@ -260,7 +276,6 @@ export default function BoardSettingsModal({
       description: description.trim(),
       columns,
       members,
-      invitations,
     })
 
     onClose()
