@@ -8,6 +8,8 @@ import {
   updateDoc,
   deleteDoc,
   onSnapshot,
+  query,
+  where,
 } from '../firebase'
 import { useAuth } from './AuthContext'
 
@@ -29,21 +31,21 @@ export const isUserMemberOfBoard = (board, user, isGuest) => {
     return board.members.some((m) => {
       if (m.id && m.id === userId) return true
       if (m.email && m.email.toLowerCase() === userEmail) return true
-      if (userName && m.name && m.name.toLowerCase() === userName) return true
-      return false
+      return !!(userName && m.name && m.name.toLowerCase() === userName);
+
     })
   }
 
   if (Array.isArray(board.memberIds)) {
     if (userId && board.memberIds.includes(userId)) return true
-    if (userEmail && board.memberIds.includes(userEmail)) return true
-    return false
+    return !!(userEmail && board.memberIds.includes(userEmail));
+
   }
 
   if (board.creatorId && userId && board.creatorId === userId) return true
-  if (board.creatorEmail && userEmail && board.creatorEmail.toLowerCase() === userEmail) return true
+  return !!(board.creatorEmail && userEmail && board.creatorEmail.toLowerCase() === userEmail);
 
-  return false
+
 }
 
 export const BoardContext = createContext(null)
@@ -87,6 +89,13 @@ export function BoardProvider({ children }) {
       return
     }
 
+    // If user is not authenticated and not in guest/offline mode, wait for auth
+    if (!currentUser?.uid && !isGuest) {
+      setBoards([])
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     let unsubBoards
     let unsubTasks
@@ -100,42 +109,56 @@ export function BoardProvider({ children }) {
     }
 
     try {
-      const boardsColl = collection(db, 'boards')
+      // 1. Query only boards where the current user is in memberIds
+      const boardsQuery = currentUser?.uid
+          ? query(
+              collection(db, 'boards'),
+              where('memberIds', 'array-contains', currentUser.uid)
+          )
+          : collection(db, 'boards')
+
       unsubBoards = onSnapshot(
-        boardsColl,
-        (snapshot) => {
-          const remoteBoards = snapshot.docs.map((docSnap) => ({
-            id: docSnap.id,
-            ...docSnap.data(),
-          }))
-          setBoards(remoteBoards)
-          boardsLoaded = true
-          checkLoaded()
-        },
-        (err) => {
-          console.warn('Firestore boards onSnapshot info:', err.message)
-          boardsLoaded = true
-          checkLoaded()
-        }
+          boardsQuery,
+          (snapshot) => {
+            const remoteBoards = snapshot.docs.map((docSnap) => ({
+              id: docSnap.id,
+              ...docSnap.data(),
+            }))
+            setBoards(remoteBoards)
+            boardsLoaded = true
+            checkLoaded()
+          },
+          (err) => {
+            console.warn('Firestore boards onSnapshot info:', err.message)
+            boardsLoaded = true
+            checkLoaded()
+          }
       )
 
-      const tasksColl = collection(db, 'tasks')
+      // 2. Query only tasks for the current user
+      const tasksQuery = currentUser?.uid
+          ? query(
+              collection(db, 'tasks'),
+              where('memberIds', 'array-contains', currentUser.uid)
+          )
+          : collection(db, 'tasks')
+
       unsubTasks = onSnapshot(
-        tasksColl,
-        (snapshot) => {
-          const remoteTasks = snapshot.docs.map((docSnap) => ({
-            id: docSnap.id,
-            ...docSnap.data(),
-          }))
-          setTasks(remoteTasks)
-          tasksLoaded = true
-          checkLoaded()
-        },
-        (err) => {
-          console.warn('Firestore tasks onSnapshot info:', err.message)
-          tasksLoaded = true
-          checkLoaded()
-        }
+          tasksQuery,
+          (snapshot) => {
+            const remoteTasks = snapshot.docs.map((docSnap) => ({
+              id: docSnap.id,
+              ...docSnap.data(),
+            }))
+            setTasks(remoteTasks)
+            tasksLoaded = true
+            checkLoaded()
+          },
+          (err) => {
+            console.warn('Firestore tasks onSnapshot info:', err.message)
+            tasksLoaded = true
+            checkLoaded()
+          }
       )
     } catch (e) {
       console.warn('Firestore init error:', e)
@@ -146,7 +169,7 @@ export function BoardProvider({ children }) {
       if (unsubBoards) unsubBoards()
       if (unsubTasks) unsubTasks()
     }
-  }, [])
+  }, [currentUser?.uid, isGuest])
 
   // Filter boards that the current user has access to (is member or creator, or guest mode)
   const accessibleBoards = useMemo(() => {
@@ -185,8 +208,8 @@ export function BoardProvider({ children }) {
         (board.members || []).some((m) => {
           if (m.id && m.id === currentUser.uid) return true
           if (m.email && m.email.toLowerCase() === userEmail) return true
-          if (userName && m.name && m.name.toLowerCase() === userName) return true
-          return false
+          return !!(userName && m.name && m.name.toLowerCase() === userName);
+
         }) ||
         board.creatorId === currentUser.uid ||
         (board.creatorEmail && board.creatorEmail.toLowerCase() === userEmail)
@@ -234,8 +257,8 @@ export function BoardProvider({ children }) {
     const member = (currentBoard.members || []).find((m) => {
       if (m.id && m.id === userId) return true
       if (m.email && m.email.toLowerCase() === userEmail) return true
-      if (userName && m.name && m.name.toLowerCase() === userName.toLowerCase()) return true
-      return false
+      return !!(userName && m.name && m.name.toLowerCase() === userName.toLowerCase());
+
     })
 
     if (member) {
@@ -492,8 +515,8 @@ export function BoardProvider({ children }) {
     const updatedMembers = (board.members || []).filter((m) => {
       if (userId && m.id === userId) return false
       if (userEmail && m.email && m.email.toLowerCase() === userEmail) return false
-      if (userName && m.name && m.name.toLowerCase() === userName) return false
-      return true
+      return !(userName && m.name && m.name.toLowerCase() === userName);
+
     })
 
     const updatedMemberIds = updatedMembers.map((m) => m.id).filter(Boolean)
