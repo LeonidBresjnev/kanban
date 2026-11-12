@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "kanban-235f8"
-  }
+  },
+  "targets": {
+    "kanban-235f8": {
+      "hosting": {
+        "funwithkanban": [
+          "funwithkanban"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
